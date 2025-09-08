@@ -7,11 +7,15 @@ module.exports = async (req, res) => {
     const { userInput } = req.body || {};
     if (!userInput) return res.status(400).json({ error: "Missing userInput" });
 
-    const prompt = `You are a task assistant. Based on this input: "${userInput}", 
-suggest 3-5 short, clear task titles. 
-Return JSON array only, like: ["Buy milk","Call plumber","Finish report"].`;
+    const prompt = `You are a helpful task assistant.
+Based on this input: "${userInput}", suggest 3-5 short, clear task titles.
 
-    const result = await callGemini("gemini-pro", prompt);
+⚠️ Important: Return ONLY a valid JSON array of strings. 
+Do not include explanations, numbering, or formatting. 
+Example: ["Buy milk","Call plumber","Finish report"]`;
+
+
+    const result = await callGemini("gemini-pro", prompt, { json: true });
     let parsed;
     try {
       parsed = JSON.parse(result);
