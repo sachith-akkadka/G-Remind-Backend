@@ -25,6 +25,7 @@ Return ONLY valid JSON in this format:
       "name": "Place name",
       "lat": 12.3456,
       "lng": 76.5432,
+      "city":"City name",
       "description": "short reason why relevant",
       "eta": "10 mins by car"
     }
