@@ -15,7 +15,7 @@ Do not include explanations, numbering, or formatting.
 Example: ["Buy milk","Call plumber","Finish report"]`;
 
 
-    const result = await callGemini("gemini-pro", prompt, { json: true });
+    const result = await callGemini("gemini-1.5-flash", prompt, { json: true });
     let parsed;
     try {
       parsed = JSON.parse(result);
