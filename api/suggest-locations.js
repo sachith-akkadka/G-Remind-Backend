@@ -2,25 +2,40 @@
 const { callGemini } = require("./_gemini_utils");
 
 module.exports = async (req, res) => {
+  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  // Allow only POST
   if (req.method !== "POST")
     return res.status(405).json({ error: "Method not allowed" });
 
-  try {
-    const { userInput, userLocation } = req.body || {};
+try {
+const { userInput, userLocation } = req.body || {};
     if (!userInput) return res.status(400).json({ error: "Missing userInput" });
+    if (!userInput)
+      return res.status(400).json({ error: "Missing userInput" });
 
-    const makePrompt = (radiusKm, userLocStr) => {
-      const nearLine = userLocStr ? `User is near (lat,lng): ${userLocStr}` : "User location not provided";
-      return `
-You are a smart assistant that suggests real-world locations related to a task.
+    const prompt = `Suggest up to 3 real-world locations relevant to this task: "${userInput}".
+User is near: ${userLocation || "unknown"}.
+Return JSON only with structure:
+    // 🔥 Prompt (optimized for consistent JSON output)
+    const prompt = `
+You are a smart assistant that suggests **real-world locations** related to a task.
 
 Task: "${userInput}"
-${nearLine}
-Search radius: ${radiusKm} km
+User is near: ${userLocation || "unknown"}
 
-Return ONLY valid JSON in this exact format:
+Return ONLY valid JSON in this format:
 {
-  "locations": [
+ "locations": [
+    { "name":"Place", "lat":12.34, "lng":56.78, "description":"short text" }
+  ]
+}`;
+
+    const result = await callGemini("gemini-1.5-flash", prompt);
+    let parsed;
+    try {
+      parsed = JSON.parse(result);
+    } catch {
+      parsed = { locations: [] };
     {
       "name": "Place name",
       "lat": 12.3456,
@@ -28,7 +43,7 @@ Return ONLY valid JSON in this exact format:
       "city": "City name",
       "description": "short reason why relevant",
       "eta": "10 mins by car"
-    }
+   }
   ]
 }
 
@@ -40,57 +55,20 @@ Rules:
 - Always include the city field when available.
 - Never include markdown, explanation text, or any output other than the JSON structure above.
 `;
-    };
 
-    // Logging to help debug
-    console.log("[suggest-locations] request", { userInput, userLocation });
+    // ✅ Gemini 2.0 Flash call
+    const result = await callGemini("gemini-2.0-flash", prompt, { json: true });
 
-    // If coords provided, try expanding radius: 20, 30, 40, ... up to maxRadiusKm
-    if (userLocation) {
-      const start = 20;
-      const step = 10;
-      const maxRadiusKm = 100; // adjust as needed
-      for (let radius = start; radius <= maxRadiusKm; radius += step) {
-        const prompt = makePrompt(radius, userLocation);
-        console.log(`[suggest-locations] calling model radius=${radius}km`);
-
-        let result;
-        try {
-          result = await callGemini("gemini-2.0-flash", prompt, { json: true });
-        } catch (err) {
-          console.error("[suggest-locations] callGemini failed:", err);
-          // try next radius — don't crash the whole loop
-          continue;
-        }
-
-        // Defensive: ensure we get an array
-        const locations = Array.isArray(result?.locations) ? result.locations : [];
-        console.log(`[suggest-locations] model returned ${locations.length} locations for radius=${radius}`);
-
-        if (locations.length > 0) {
-          return res.json({ success: true, data: locations.slice(0, 3) });
-        }
-        // else continue increasing radius
-      }
-
-      // exhausted radii, return empty
-      console.log("[suggest-locations] exhausted radii, returning empty list");
-      return res.json({ success: true, data: [] });
-    } else {
-      // No coords — single try
-      const prompt = makePrompt("no coords provided", null);
-      let result;
-      try {
-        result = await callGemini("gemini-2.0-flash", prompt, { json: true });
-      } catch (err) {
-        console.error("[suggest-locations] callGemini failed (no coords):", err);
-        return res.status(500).json({ error: "LLM call failed" });
-      }
-      const locations = Array.isArray(result?.locations) ? result.locations : [];
-      return res.json({ success: true, data: locations.slice(0, 3) });
-    }
-  } catch (e) {
-    console.error("suggest-locations error:", e);
+    return res.json({ success: true, data: parsed.locations || [] });
+    return res.json({
+      success: true,
+      data: result?.locations || [],
+    });
+} catch (e) {
+console.error("suggest-locations error:", e);
     return res.status(500).json({ error: e.message || String(e) });
-  }
+    return res.status(500).json({
+      error: e.message || String(e),
+    });
+}
 };
