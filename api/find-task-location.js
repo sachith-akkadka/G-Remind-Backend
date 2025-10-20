@@ -1,27 +1,44 @@
+// ✅ Import Gemini helper
 const { callGemini } = require("./_gemini_utils");
 
 module.exports = async (req, res) => {
-  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  // ✅ Restrict to POST requests only
+  if (req.method !== "POST")
+    return res.status(405).json({ error: "Method not allowed" });
 
   try {
+    // ✅ Read input safely
     const { userInput, userLocation } = req.body || {};
-    if (!userInput) return res.status(400).json({ error: "Missing userInput" });
+    if (!userInput)
+      return res.status(400).json({ error: "Missing userInput" });
 
-    const prompt = `Find the single most relevant real-world location for this task: "${userInput}".
-User is near: ${userLocation || "unknown"}.
-Return JSON only: { "name": "...", "lat": 12.34, "lng": 56.78, "description": "short" }`;
+    // ✅ Stronger prompt for consistent JSON output
+    const prompt = `
+You are a helpful AI that finds the *most relevant real-world location* for a given task.
 
-    const result = await callGemini("gemini-2.5-flash", prompt);
-    let parsed;
-    try {
-      parsed = JSON.parse(result);
-    } catch {
-      parsed = null;
-    }
+Task: "${userInput}"
+User is near: ${userLocation || "unknown"}
 
-    return res.json({ success: true, data: parsed });
+Rules:
+- Always respond with **pure JSON only**, no text before or after.
+- JSON structure:
+{
+  "name": "Place name",
+  "lat": 12.34,
+  "lng": 56.78,
+  "description": "short 1-line about why relevant"
+}
+`;
+
+    // ✅ Call Gemini with JSON extraction mode enabled
+    const result = await callGemini("gemini-2.0-flash", prompt, { json: true });
+
+    // ✅ Return parsed data (result will already be JSON if extraction worked)
+    return res.json({ success: true, data: result });
   } catch (e) {
     console.error("find-task-location error:", e);
-    return res.status(500).json({ error: e.message || String(e) });
+    return res
+      .status(500)
+      .json({ error: e.message || String(e) });
   }
 };
