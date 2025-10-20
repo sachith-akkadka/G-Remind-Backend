@@ -16,16 +16,16 @@ module.exports = async (req, res) => {
 You are a smart assistant that suggests **real-world locations** related to a task.
 
 Task: "${userInput}"
-User is near: ${userLocation || "unknown"}
+User is near (lat,lng): ${userLocation || "unknown"}
 
-Return ONLY valid JSON in this format:
+Return ONLY JSON:
 {
   "locations": [
     {
       "name": "Place name",
       "lat": 12.3456,
       "lng": 76.5432,
-      "city":"City name",
+      "city": "Mysore",
       "description": "short reason why relevant",
       "eta": "10 mins by car"
     }
@@ -33,9 +33,12 @@ Return ONLY valid JSON in this format:
 }
 
 Rules:
-- Return 5 items maximum.
-- Never include markdown or explanations.
-- If no relevant locations, return { "locations": [] }.
+- If `userLocation` is "unknown", return up to 3 general results clearly labeled with city.
+- If `userLocation` is provided, **return only places within 20 km of that lat,lng**.
+- If no relevant places within radius, return { "locations": [] }.
+- Do not invent lat/lng — if unsure, return empty list.
+- Do not include markdown or extra text.
+
 `;
 
     // ✅ Gemini 2.0 Flash call
