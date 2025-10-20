@@ -11,7 +11,7 @@ module.exports = async (req, res) => {
 User is near: ${userLocation || "unknown"}.
 Return JSON only: { "name": "...", "lat": 12.34, "lng": 56.78, "description": "short" }`;
 
-    const result = await callGemini("gemini-1.5-flash", prompt);
+    const result = await callGemini("gemini-2.5-flash", prompt);
     let parsed;
     try {
       parsed = JSON.parse(result);
