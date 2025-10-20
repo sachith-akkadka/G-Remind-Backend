@@ -1,22 +1,37 @@
+// ✅ Import Gemini helper
 const { callGemini } = require("./_gemini_utils");
 
 module.exports = async (req, res) => {
-  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  // Allow only POST
+  if (req.method !== "POST")
+    return res.status(405).json({ error: "Method not allowed" });
 
   try {
     const { taskTitle } = req.body || {};
-    if (!taskTitle) return res.status(400).json({ error: "Missing taskTitle" });
+    if (!taskTitle)
+      return res.status(400).json({ error: "Missing taskTitle" });
 
-    const prompt = `Categorize this task: "${taskTitle}". 
-Categories: Work, Personal, Shopping, Errands, Health, Other. 
-Return only the category text.`;
+    // 🔥 Clean prompt for single-category output
+    const prompt = `
+You are a task categorizer.
+Categorize this task: "${taskTitle}"
+Choose **only one** of the following categories:
+Work, Personal, Shopping, Errands, Health, or Other.
 
-    const result = await callGemini("ggemini-1.5-flash", prompt);
-    const category = (result || "Other").split("\n")[0].trim();
+Return JSON only:
+{ "category": "Work" }
+`;
 
-    return res.json({ success: true, data: { category } });
+    const result = await callGemini("gemini-2.0-flash", prompt, { json: true });
+
+    return res.json({
+      success: true,
+      data: result || { category: "Other" },
+    });
   } catch (e) {
     console.error("suggest-task-category error:", e);
-    return res.status(500).json({ error: e.message || String(e) });
+    return res.status(500).json({
+      error: e.message || String(e),
+    });
   }
 };
