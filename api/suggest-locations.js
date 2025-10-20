@@ -33,8 +33,8 @@ Return ONLY JSON:
 }
 
 Rules:
-- If `userLocation` is "unknown", return up to 3 general results clearly labeled with city.
-- If `userLocation` is provided, **return only places within 20 km of that lat,lng**.
+- If 'userLocation' is "unknown", return up to 3 general results clearly labeled with city.
+- If 'userLocation' is provided, **return only places within 20 km of that lat,lng**.
 - If no relevant places within radius, return { "locations": [] }.
 - Do not invent lat/lng — if unsure, return empty list.
 - Do not include markdown or extra text.
