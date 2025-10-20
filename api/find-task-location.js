@@ -26,7 +26,8 @@ Rules:
   "name": "Place name",
   "lat": 12.34,
   "lng": 56.78,
-  "description": "short 1-line about why relevant"
+  "description": "short one-line reason why this place fits the task",
+  "eta": "10 mins by car"
 }
 `;
 
