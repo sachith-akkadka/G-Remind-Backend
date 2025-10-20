@@ -33,7 +33,7 @@ Return ONLY valid JSON in this format:
 }
 
 Rules:
-- Return 3 items maximum.
+- Return 5 items maximum.
 - Never include markdown or explanations.
 - If no relevant locations, return { "locations": [] }.
 `;
