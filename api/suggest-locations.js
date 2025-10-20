@@ -16,7 +16,7 @@ Return JSON only with structure:
   ]
 }`;
 
-    const result = await callGemini("gemini-pro", prompt);
+    const result = await callGemini("gemini-1.5-flash", prompt);
     let parsed;
     try {
       parsed = JSON.parse(result);
