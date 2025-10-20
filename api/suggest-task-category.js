@@ -11,7 +11,7 @@ module.exports = async (req, res) => {
 Categories: Work, Personal, Shopping, Errands, Health, Other. 
 Return only the category text.`;
 
-    const result = await callGemini("gemini-pro", prompt);
+    const result = await callGemini("ggemini-1.5-flash", prompt);
     const category = (result || "Other").split("\n")[0].trim();
 
     return res.json({ success: true, data: { category } });
