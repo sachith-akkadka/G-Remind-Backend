@@ -7,7 +7,7 @@ if (!GEMINI_KEY) {
 }
 const genAI = new GoogleGenerativeAI(GEMINI_KEY);
 
-// safe wrapper
+// Safe wrapper with better JSON extraction
 async function callGemini(modelName, prompt, { json = false } = {}) {
   const model = genAI.getGenerativeModel({ model: modelName });
 
@@ -15,12 +15,16 @@ async function callGemini(modelName, prompt, { json = false } = {}) {
   const text = resp.response.text();
 
   if (json) {
+    // Try to safely extract any JSON-like content
     try {
       const jsonMatch = text.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
       if (jsonMatch) return JSON.parse(jsonMatch[0]);
-    } catch {}
+    } catch (err) {
+      console.warn("⚠️ JSON parse failed:", err, "\nResponse was:", text);
+    }
   }
-  return text;
+
+  return text.trim();
 }
 
 module.exports = { callGemini };
