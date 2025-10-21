@@ -26,11 +26,11 @@ User is near: ${userLocation || "unknown"}
 Return ONLY valid JSON in this format:
 {
  "locations": [
-    { "name":"Place", "lat":12.34, "lng":56.78, "description":"short text" }
+    { "name":"Place", "lat":12.34, "lng":56.78,"city":"City", "description":"short text", "eta": "ETA" }
   ]
 }`;
 
-    const result = await callGemini("gemini-1.5-flash", prompt);
+    const result = await callGemini("gemini-2.0-flash", prompt);
     let parsed;
     try {
       parsed = JSON.parse(result);
@@ -48,12 +48,9 @@ Return ONLY valid JSON in this format:
 }
 
 Rules:
-- Return 3 items maximum.
-- If userLocation is provided, return ONLY places within ${radiusKm} km of that lat,lng.
-- If none are relevant within ${radiusKm} km, return { "locations": [] } for this attempt (do NOT invent places).
-- Do NOT make up lat/lng values. If you are unsure of accurate coordinates, return an empty list.
-- Always include the city field when available.
-- Never include markdown, explanation text, or any output other than the JSON structure above.
+- Return 5 items maximum.
+- Never include markdown or explanations.
+- If no relevant locations, return { "locations": [] }.
 `;
 
     // ✅ Gemini 2.0 Flash call
