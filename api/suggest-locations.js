@@ -38,8 +38,8 @@ Return ONLY valid JSON in this format:
 Rules:
 - Return up to 10 items maximum.
 - Never include markdown, explanations, or extra text.
-- If no relevant places are found within 2 - 5 km, increase the radius by 5 km and retry.
-- If still no results, return { "locations": [] }.
+- Provide the relevant places found within 0 - 20 km.
+- If no results, return { "locations": [] }.
 `;
 
     // ✅ Call Gemini and ensure JSON mode
