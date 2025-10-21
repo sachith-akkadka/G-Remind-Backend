@@ -2,21 +2,18 @@
 const { callGemini } = require("./_gemini_utils");
 
 module.exports = async (req, res) => {
-  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
   // Allow only POST
-  if (req.method !== "POST")
+  if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
+  }
 
-try {
-const { userInput, userLocation } = req.body || {};
-    if (!userInput) return res.status(400).json({ error: "Missing userInput" });
-    if (!userInput)
+  try {
+    const { userInput, userLocation } = req.body || {};
+    if (!userInput) {
       return res.status(400).json({ error: "Missing userInput" });
+    }
 
-    const prompt = `Suggest up to 3 real-world locations relevant to this task: "${userInput}".
-User is near: ${userLocation || "unknown"}.
-Return JSON only with structure:
-    // 🔥 Prompt (optimized for consistent JSON output)
+    // ✅ Clean prompt
     const prompt = `
 You are a smart assistant that suggests **real-world locations** related to a task.
 
@@ -26,16 +23,6 @@ User is near: ${userLocation || "unknown"}
 Return ONLY valid JSON in this format:
 {
  "locations": [
-    { "name":"Place", "lat":12.34, "lng":56.78,"city":"City", "description":"short text", "eta": "ETA" }
-  ]
-}`;
-
-    const result = await callGemini("gemini-2.0-flash", prompt);
-    let parsed;
-    try {
-      parsed = JSON.parse(result);
-    } catch {
-      parsed = { locations: [] };
     {
       "name": "Place name",
       "lat": 12.3456,
@@ -43,29 +30,30 @@ Return ONLY valid JSON in this format:
       "city": "City name",
       "description": "short reason why relevant",
       "eta": "10 mins by car"
-   }
+    }
   ]
 }
 
 Rules:
-- Return 5 items maximum.
-- Never include markdown or explanations.
-- If no relevant locations, return { "locations": [] }.
+- Return up to 5 items maximum.
+- Never include markdown, explanations, or extra text.
+- If no relevant places are found within 20 km, increase the radius by 10 km and retry.
+- If still no results, return { "locations": [] }.
 `;
 
-    // ✅ Gemini 2.0 Flash call
+    // ✅ Call Gemini and ensure JSON mode
     const result = await callGemini("gemini-2.0-flash", prompt, { json: true });
 
-    return res.json({ success: true, data: parsed.locations || [] });
-    return res.json({
-      success: true,
-      data: result?.locations || [],
-    });
-} catch (e) {
-console.error("suggest-locations error:", e);
+    // Ensure we return consistent data
+    const locations = Array.isArray(result?.locations)
+      ? result.locations
+      : Array.isArray(result?.data)
+      ? result.data
+      : [];
+
+    return res.json({ success: true, data: locations });
+  } catch (e) {
+    console.error("suggest-locations error:", e);
     return res.status(500).json({ error: e.message || String(e) });
-    return res.status(500).json({
-      error: e.message || String(e),
-    });
-}
+  }
 };
