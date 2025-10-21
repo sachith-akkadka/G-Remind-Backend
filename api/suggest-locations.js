@@ -14,47 +14,36 @@ module.exports = async (req, res) => {
     }
 
   const prompt = `
-You are a smart assistant that finds **real-world locations** related to a given task using authoritative map data (preferably Google Maps Places API and Directions API). Use real, verifiable place entries only — do NOT invent or approximate places or coordinates.
+You are a smart assistant that suggests **real nearby places** using **Google Maps data only** (Places API + Directions API). No made-up names or coordinates.
 
 Task: "${userInput}"
 User is near: ${userLocation || "unknown"}
 
-Return ONLY valid JSON in this exact format (no extra keys, no markdown, no commentary):
+Return ONLY valid JSON in this format:
 {
  "locations": [
     {
       "name": "Place name",
-      "lat": 12.345678,        // required: WGS84 decimal degrees, minimum 6 decimal places
-      "lng": 76.543210,        // required: WGS84 decimal degrees, minimum 6 decimal places
+      "lat": 12.345678,
+      "lng": 76.543210,
       "city": "City name",
-      "address": "Full street address as returned by the map provider",
-      "description": "short reason why relevant",
-      "eta": "10 mins by car"  // computed using actual driving time from Directions API when possible
+      "address": "Full address",
+      "description": "Why it's relevant",
+      "eta": "10 mins by car"
     }
   ]
 }
 
-Mandatory rules (enforce these strictly):
-- Use **real** map provider data (Google Maps Places + Directions APIs recommended). If using another provider, it must be an authoritative map/place service.
-- **Coordinates (lat, lng)** must come directly from the map provider's place record (WGS84, decimal degrees) and include at least 6 decimal digits. Do not fabricate or round to low precision.
-- If the place has multiple location entries, use the canonical place's coordinates returned by the provider.
-- Only include places within **0–20 km** of the user's location (compute great-circle distance; use road distance only to filter if you have reliable routing data). If the user's location is unknown, return **{ "locations": [] }**.
-- **Sort results by proximity ascending** (nearest first).
-- Return a maximum of **10** items.
-- Compute **ETA** using driving directions where possible (Directions API). If driving ETA cannot be obtained, return best estimate in minutes and indicate the mode as part of the string (e.g., "15 mins by car", "25 mins walking").
-- The **address** field must be the full formatted address returned by the map provider (not a short label).
-- If no results meet the criteria, return exactly: **{ "locations": [] }**.
-- Do not include any keys other than the ones shown above. Do not include URLs, API keys, or raw provider responses in the output.
-- Validate output JSON strictly before returning it: all numeric fields must be numbers, strings must be strings, and arrays/objects must be properly typed.
-
-Implementation notes for your system (not part of the JSON output):
-- Prefer using Google Maps Places API (Place Search / Nearby Search / Text Search) to find candidates and use the Place Details response for exact "lat"/"lng" and "formatted_address".
-- Use the Directions API (origin = user location, destination = place) to compute driving ETA; fall back to estimated driving time based on distance and local speed assumptions only if Directions data is unavailable.
-- Use the provider's measured coordinates; never substitute with geocoding approximations you generate yourself.
+Rules:
+- Use **real Google Maps results** — no fake data.
+- Get exact **lat/lng** from Google Maps (WGS84, 6 decimals).
+- Show only places within **0–20 km**.
+- **Sort by distance (nearest first)**.
+- Include **up to 10** results.
+- Compute **ETA** via Google Directions API if possible.
+- If nothing found, return { "locations": [] }.
+- Output must be **pure JSON**, no markdown or text.
 `;
-
-
-
     // ✅ Call Gemini and ensure JSON mode
     const result = await callGemini("gemini-2.0-flash", prompt, { json: true });
 
