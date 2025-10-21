@@ -13,35 +13,46 @@ module.exports = async (req, res) => {
       return res.status(400).json({ error: "Missing userInput" });
     }
 
-   const prompt = `
-You are a smart assistant that finds **real-world locations** related to a given task using reliable geographic data (e.g., Google Maps).
+  const prompt = `
+You are a smart assistant that finds **real-world locations** related to a given task using authoritative map data (preferably Google Maps Places API and Directions API). Use real, verifiable place entries only — do NOT invent or approximate places or coordinates.
 
 Task: "${userInput}"
 User is near: ${userLocation || "unknown"}
 
-Return ONLY valid JSON in this format:
+Return ONLY valid JSON in this exact format (no extra keys, no markdown, no commentary):
 {
  "locations": [
     {
       "name": "Place name",
-      "lat": 12.3456,
-      "lng": 76.5432,
+      "lat": 12.345678,        // required: WGS84 decimal degrees, minimum 6 decimal places
+      "lng": 76.543210,        // required: WGS84 decimal degrees, minimum 6 decimal places
       "city": "City name",
-      "address": "Address",
+      "address": "Full street address as returned by the map provider",
       "description": "short reason why relevant",
-      "eta": "10 mins by car"
+      "eta": "10 mins by car"  // computed using actual driving time from Directions API when possible
     }
   ]
 }
 
-Rules:
-- Always use **real** and **verifiable** data sources (e.g., Google Maps or other real map listings). Do not invent places.
-- Include only locations **within 0–20 km** of the user.
-- Sort results by **distance from the user** — the **nearest** locations must appear **first**.
-- Return **up to 10** results maximum.
-- Never include markdown, commentary, or explanations — only the JSON output.
-- If no suitable places are found, return: { "locations": [] }.
+Mandatory rules (enforce these strictly):
+- Use **real** map provider data (Google Maps Places + Directions APIs recommended). If using another provider, it must be an authoritative map/place service.
+- **Coordinates (lat, lng)** must come directly from the map provider's place record (WGS84, decimal degrees) and include at least 6 decimal digits. Do not fabricate or round to low precision.
+- If the place has multiple location entries, use the canonical place's coordinates returned by the provider.
+- Only include places within **0–20 km** of the user's location (compute great-circle distance; use road distance only to filter if you have reliable routing data). If the user's location is unknown, return **{ "locations": [] }**.
+- **Sort results by proximity ascending** (nearest first).
+- Return a maximum of **10** items.
+- Compute **ETA** using driving directions where possible (Directions API). If driving ETA cannot be obtained, return best estimate in minutes and indicate the mode as part of the string (e.g., "15 mins by car", "25 mins walking").
+- The **address** field must be the full formatted address returned by the map provider (not a short label).
+- If no results meet the criteria, return exactly: **{ "locations": [] }**.
+- Do not include any keys other than the ones shown above. Do not include URLs, API keys, or raw provider responses in the output.
+- Validate output JSON strictly before returning it: all numeric fields must be numbers, strings must be strings, and arrays/objects must be properly typed.
+
+Implementation notes for your system (not part of the JSON output):
+- Prefer using Google Maps Places API (Place Search / Nearby Search / Text Search) to find candidates and use the Place Details response for exact "lat"/"lng" and "formatted_address".
+- Use the Directions API (origin = user location, destination = place) to compute driving ETA; fall back to estimated driving time based on distance and local speed assumptions only if Directions data is unavailable.
+- Use the provider's measured coordinates; never substitute with geocoding approximations you generate yourself.
 `;
+
 
 
     // ✅ Call Gemini and ensure JSON mode
