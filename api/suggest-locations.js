@@ -13,8 +13,7 @@ module.exports = async (req, res) => {
       return res.status(400).json({ error: "Missing userInput" });
     }
 
-    // ✅ Clean prompt
-    const prompt = `
+   const prompt = `
 You are a smart assistant that finds **real-world locations** related to a given task using reliable geographic data (e.g., Google Maps).
 
 Task: "${userInput}"
@@ -39,10 +38,11 @@ Rules:
 - Always use **real** and **verifiable** data sources (e.g., Google Maps or other real map listings). Do not invent places.
 - Include only locations **within 0–20 km** of the user.
 - Sort results by **distance from the user** — the **nearest** locations must appear **first**.
-- Return **up to 10** results.
+- Return **up to 10** results maximum.
 - Never include markdown, commentary, or explanations — only the JSON output.
 - If no suitable places are found, return: { "locations": [] }.
 `;
+
 
     // ✅ Call Gemini and ensure JSON mode
     const result = await callGemini("gemini-2.0-flash", prompt, { json: true });
