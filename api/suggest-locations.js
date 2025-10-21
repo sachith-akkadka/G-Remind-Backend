@@ -14,54 +14,33 @@ module.exports = async (req, res) => {
     }
 
     // ✅ Clean prompt
-const prompt = `
-You are a precise assistant that suggests real-world locations (temples) relevant to a user's task.
+    const prompt = `
+You are a smart assistant that suggests **real-world locations** related to a task.
 
 Task: "${userInput}"
-User is near (lat,lng): ${userLocation || "unknown"}
+User is near: ${userLocation || "unknown"}
 
-Return ONLY valid JSON in this exact format:
+Return ONLY valid JSON in this format:
 {
-  "locations": [
+ "locations": [
     {
       "name": "Place name",
-      "lat": 12.345678,
-      "lng": 76.543210,
-      "city": "City name" or null,
-      "address": "Full address string",
-      "distance_km": 3.2,
-      "eta": "5 mins by car",
-      "source": "Google Maps"
+      "lat": 12.3456,
+      "lng": 76.5432,
+      "city": "City name",
+      "address": "Address",
+      "description": "short reason why relevant",
+      "eta": "10 mins by car"
     }
   ]
 }
 
-Rules (follow exactly):
-1. Return up to 5 nearest temples only (prefer temples; return other types only if no temples exist within the search radii).
-2. Iterative radius: first search within 5 km. If no temples, increase radius by 10 km and retry (5 → 15 → 25 → 35 …) up to a maximum of 100 km. Stop when you find >=1 temple (return up to 5) and do not continue searching further.
-3. If userLocation === "unknown", return up to 3 relevant temples (include city when known).
-4. Use authoritative sources for lat/lng, city, address, distance_km and eta. Prefer "Google Maps" as the source if you have an integration available. If you do NOT have access to any external mapping API, do NOT invent exact lat/lng, distance_km, or eta — return { "locations": [] } instead.
-5. distance_km must be numeric (kilometers) with one decimal place. lat/lng must be decimal with up to 6 places. eta must be a short human string (e.g., "6 mins by car").
-6. Always include "city" (or null if unknown). Do not invent city names.
-7. No markdown, no explanations, no extra fields — return only the JSON object above.
-
-Example output:
-{
-  "locations": [
-    {
-      "name": "Sri Lakshmi Venkateshwara Temple",
-      "lat": 12.777862,
-      "lng": 75.185126,
-      "city": "Kinnigoli",
-      "address": "Area/street, Kinnigoli, Karnataka",
-      "distance_km": 2.1,
-      "eta": "6 mins by car",
-      "source": "Google Maps"
-    }
-  ]
-}
+Rules:
+- Return up to 10 items maximum.
+- Never include markdown, explanations, or extra text.
+- If no relevant places are found within 2 - 5 km, increase the radius by 5 km and retry.
+- If still no results, return { "locations": [] }.
 `;
-
 
     // ✅ Call Gemini and ensure JSON mode
     const result = await callGemini("gemini-2.0-flash", prompt, { json: true });
