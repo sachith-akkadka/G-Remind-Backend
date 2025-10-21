@@ -37,7 +37,7 @@ Return ONLY valid JSON in this format:
 Rules:
 - Return up to 5 items maximum.
 - Never include markdown, explanations, or extra text.
-- If no relevant places are found within 20 km, increase the radius by 10 km and retry.
+- If no relevant places are found within 2 - 5 km, increase the radius by 5 km and retry.
 - If still no results, return { "locations": [] }.
 `;
 
