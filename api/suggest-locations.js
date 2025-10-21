@@ -15,7 +15,7 @@ module.exports = async (req, res) => {
 
     // ✅ Clean prompt
     const prompt = `
-You are a smart assistant that suggests **real-world locations** related to a task.
+You are a smart assistant that finds **real-world locations** related to a given task using reliable geographic data (e.g., Google Maps).
 
 Task: "${userInput}"
 User is near: ${userLocation || "unknown"}
@@ -36,10 +36,12 @@ Return ONLY valid JSON in this format:
 }
 
 Rules:
-- Return up to 10 items maximum.
-- Never include markdown, explanations, or extra text.
-- Provide the relevant places found within 0 - 20 km.
-- If no results, return { "locations": [] }.
+- Always use **real** and **verifiable** data sources (e.g., Google Maps or other real map listings). Do not invent places.
+- Include only locations **within 0–20 km** of the user.
+- Sort results by **distance from the user** — the **nearest** locations must appear **first**.
+- Return **up to 10** results maximum.
+- Never include markdown, commentary, or explanations — only the JSON output.
+- If no suitable places are found, return: { "locations": [] }.
 `;
 
     // ✅ Call Gemini and ensure JSON mode
