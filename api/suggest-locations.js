@@ -39,7 +39,7 @@ Rules:
 - Always use **real** and **verifiable** data sources (e.g., Google Maps or other real map listings). Do not invent places.
 - Include only locations **within 0–20 km** of the user.
 - Sort results by **distance from the user** — the **nearest** locations must appear **first**.
-- Return **up to 10** results maximum.
+- Return **up to 10** results.
 - Never include markdown, commentary, or explanations — only the JSON output.
 - If no suitable places are found, return: { "locations": [] }.
 `;
