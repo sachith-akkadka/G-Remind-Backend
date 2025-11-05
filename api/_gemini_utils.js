@@ -1,11 +1,18 @@
 // api/_gemini_utils.js
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 
+// ✅ Load Gemini API key
 const GEMINI_KEY = process.env.GEMINI_API_KEY;
 if (!GEMINI_KEY) {
   console.warn("⚠️ GEMINI_API_KEY not set in env");
 }
 const genAI = new GoogleGenerativeAI(GEMINI_KEY);
+
+// ✅ Load Google Maps API key (added)
+const GOOGLE_MAPS_KEY = process.env.GOOGLE_MAPS_API_KEY;
+if (!GOOGLE_MAPS_KEY) {
+  console.warn("⚠️ GOOGLE_MAPS_API_KEY not set in env");
+}
 
 // Safe wrapper with better JSON extraction
 async function callGemini(modelName, prompt, { json = false } = {}) {
@@ -27,4 +34,5 @@ async function callGemini(modelName, prompt, { json = false } = {}) {
   return text.trim();
 }
 
-module.exports = { callGemini };
+// ✅ Export Google Maps key as well (optional)
+module.exports = { callGemini, GOOGLE_MAPS_KEY };
