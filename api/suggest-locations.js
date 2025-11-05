@@ -5,18 +5,11 @@ const { GOOGLE_MAPS_KEY } = require("./_gemini_utils");
 // ---------- helpers ----------
 async function fetchJSON(url, opts) {
   const r = await fetch(url, opts);
-  const text = await r.text().catch(() => "");
-  let json;
-  try {
-    json = text ? JSON.parse(text) : {};
-  } catch {
-    throw new Error(`Bad JSON from ${url}: ${text?.slice(0, 200) || "no body"}`);
-  }
   if (!r.ok) {
-    const msg = json?.error_message || json?.status || r.statusText;
-    throw new Error(`HTTP ${r.status}: ${msg}`);
+    const text = await r.text().catch(() => "");
+    throw new Error(`HTTP ${r.status}: ${text || r.statusText}`);
   }
-  return json;
+  return r.json();
 }
 
 function parseUserLocation(userLocation) {
@@ -65,18 +58,6 @@ function parseCityFromAddress(addr) {
   return parts[0] || "";
 }
 
-function haversineMeters(a, b) {
-  // a: {lat,lng}, b: {lat,lng}
-  const R = 6371000;
-  const toRad = d => d * Math.PI / 180;
-  const dLat = toRad(b.lat - a.lat);
-  const dLng = toRad(b.lng - a.lng);
-  const lat1 = toRad(a.lat);
-  const lat2 = toRad(b.lat);
-  const h = Math.sin(dLat/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLng/2)**2;
-  return 2 * R * Math.asin(Math.sqrt(h));
-}
-
 // ---------- route ----------
 module.exports = async (req, res) => {
   if (req.method !== "POST")
@@ -98,7 +79,7 @@ module.exports = async (req, res) => {
     if (!keyword)
       return res.json({ success: true, data: [] });
 
-    // 1) Nearby Search (rank by distance) with keyword only
+    // 1️⃣ Try Nearby Search (rank by distance)
     const nsParams = new URLSearchParams({
       location: `${origin.lat},${origin.lng}`,
       rankby: "distance",
@@ -108,7 +89,14 @@ module.exports = async (req, res) => {
     const nsUrl = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?${nsParams.toString()}`;
     let searchResults = await fetchJSON(nsUrl);
 
-    // Fallback to Text Search (20km) if Nearby returns nothing
+    // 🔍 Debug log for Nearby Search
+    console.log("NearbySearch:", {
+      status: searchResults.status,
+      error_message: searchResults.error_message,
+      results_length: searchResults.results?.length || 0
+    });
+
+    // 2️⃣ Fallback to Text Search if no results
     if (searchResults.status !== "OK" || !Array.isArray(searchResults.results) || searchResults.results.length === 0) {
       const tsParams = new URLSearchParams({
         query: keyword,
@@ -119,14 +107,28 @@ module.exports = async (req, res) => {
       const tsUrl = `https://maps.googleapis.com/maps/api/place/textsearch/json?${tsParams.toString()}`;
       searchResults = await fetchJSON(tsUrl);
 
+      // 🔍 Debug log for Text Search
+      console.log("TextSearch:", {
+        status: searchResults.status,
+        error_message: searchResults.error_message,
+        results_length: searchResults.results?.length || 0
+      });
+
       if (searchResults.status !== "OK" || !Array.isArray(searchResults.results) || searchResults.results.length === 0) {
-        // Surface Google status to help debugging instead of silent []
-        return res.json({ success: true, data: [], meta: { source: "textsearch", status: searchResults.status, msg: searchResults.error_message || null } });
+        return res.json({
+          success: true,
+          data: [],
+          meta: {
+            source: "textsearch",
+            status: searchResults.status,
+            msg: searchResults.error_message || null
+          }
+        });
       }
     }
 
-    // Take up to 20 candidates with coordinates
-    let candidates = searchResults.results.slice(0, 20).map(p => {
+    // ✅ Take up to 20 candidates
+    const candidates = searchResults.results.slice(0, 20).map(p => {
       const lat = p.geometry?.location?.lat;
       const lng = p.geometry?.location?.lng;
       return lat != null && lng != null ? { raw: p, lat, lng } : null;
@@ -135,70 +137,16 @@ module.exports = async (req, res) => {
     if (candidates.length === 0)
       return res.json({ success: true, data: [] });
 
-    // Pre-filter by Haversine ≤ 20km (in case DM fails later)
-    candidates = candidates
-      .map(c => ({ ...c, approxMeters: haversineMeters(origin, { lat: c.lat, lng: c.lng }) }))
-      .filter(c => Number.isFinite(c.approxMeters) && c.approxMeters <= 20000);
-
-    if (candidates.length === 0)
-      return res.json({ success: true, data: [] });
-
-    // 2) Try Distance Matrix for driving distance + ETA
-    let merged;
-    try {
-      const destinations = candidates.map(c => `${c.lat},${c.lng}`).join("|");
-      const dmParams = new URLSearchParams({
-        origins: `${origin.lat},${origin.lng}`,
-        destinations,
-        mode: "driving",
-        key: GOOGLE_MAPS_KEY,
-      });
-      const dmUrl = `https://maps.googleapis.com/maps/api/distancematrix/json?${dmParams.toString()}`;
-      const dm = await fetchJSON(dmUrl);
-
-      const row = dm.rows?.[0];
-      const elems = row?.elements;
-
-      if (!Array.isArray(elems) || dm.status !== "OK") {
-        throw new Error(dm.error_message || dm.status || "Distance Matrix unavailable");
-      }
-
-      merged = candidates.map((c, i) => {
-        const el = elems[i];
-        const ok = el && el.status === "OK";
-        return {
-          place: c.raw,
-          lat: c.lat,
-          lng: c.lng,
-          distanceMeters: ok ? el.distance?.value ?? c.approxMeters : c.approxMeters,
-          etaText: ok ? el.duration?.text ?? null : null,
-        };
-      });
-    } catch (dmErr) {
-      // 🔥 Fallback: use haversine distance only (no ETA)
-      merged = candidates.map(c => ({
-        place: c.raw,
-        lat: c.lat,
-        lng: c.lng,
-        distanceMeters: c.approxMeters,
-        etaText: null,
-      }));
-    }
-
-    // Sort by distance and cap to 10
-    merged.sort((a, b) => a.distanceMeters - b.distanceMeters);
-    const top = merged.slice(0, 10);
-
-    const locations = top.map(m => {
-      const address = m.place.formatted_address || m.place.vicinity || (m.place.plus_code?.compound_code || "");
+    // 3️⃣ Just return these (skip DM for now to isolate problem)
+    const locations = candidates.map(c => {
+      const address = c.raw.formatted_address || c.raw.vicinity || "";
       return {
-        name: m.place.name,
-        lat: Number(m.lat.toFixed(6)),
-        lng: Number(m.lng.toFixed(6)),
-        city: parseCityFromAddress(address),
+        name: c.raw.name,
+        lat: Number(c.lat.toFixed(6)),
+        lng: Number(c.lng.toFixed(6)),
         address,
-        description: address ? `near ${parseCityFromAddress(address) || "you"}` : "near you",
-        eta: m.etaText || "ETA unavailable",
+        city: parseCityFromAddress(address),
+        description: address ? `near ${parseCityFromAddress(address)}` : "near you",
       };
     });
 
