@@ -5,11 +5,18 @@ const { GOOGLE_MAPS_KEY } = require("./_gemini_utils");
 // ---------- helpers ----------
 async function fetchJSON(url, opts) {
   const r = await fetch(url, opts);
-  if (!r.ok) {
-    const text = await r.text().catch(() => "");
-    throw new Error(`HTTP ${r.status}: ${text || r.statusText}`);
+  const text = await r.text().catch(() => "");
+  let json;
+  try {
+    json = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(`Bad JSON from ${url}: ${text?.slice(0, 200) || "no body"}`);
   }
-  return r.json();
+  if (!r.ok) {
+    const msg = json?.error_message || json?.status || r.statusText;
+    throw new Error(`HTTP ${r.status}: ${msg}`);
+  }
+  return json;
 }
 
 function parseUserLocation(userLocation) {
@@ -37,7 +44,6 @@ function extractKeyword(q) {
 
   if (!cleaned) return "";
 
-  // remove leading filler phrases
   const stopPhrases = [
     "go to", "find me", "find a", "find", "search", "look for",
     "near me", "nearby", "closest", "nearest", "around me", "around"
@@ -57,6 +63,18 @@ function parseCityFromAddress(addr) {
   const parts = addr.split(",").map(s => s.trim()).filter(Boolean);
   if (parts.length >= 2) return parts[parts.length - 2];
   return parts[0] || "";
+}
+
+function haversineMeters(a, b) {
+  // a: {lat,lng}, b: {lat,lng}
+  const R = 6371000;
+  const toRad = d => d * Math.PI / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const h = Math.sin(dLat/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLng/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(h));
 }
 
 // ---------- route ----------
@@ -80,7 +98,7 @@ module.exports = async (req, res) => {
     if (!keyword)
       return res.json({ success: true, data: [] });
 
-    // 1) Try Nearby Search (rank by distance) with keyword ONLY (no type – fully generic)
+    // 1) Nearby Search (rank by distance) with keyword only
     const nsParams = new URLSearchParams({
       location: `${origin.lat},${origin.lng}`,
       rankby: "distance",
@@ -90,7 +108,7 @@ module.exports = async (req, res) => {
     const nsUrl = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?${nsParams.toString()}`;
     let searchResults = await fetchJSON(nsUrl);
 
-    // 2) Fallback to Text Search within 20 km if Nearby returns nothing
+    // Fallback to Text Search (20km) if Nearby returns nothing
     if (searchResults.status !== "OK" || !Array.isArray(searchResults.results) || searchResults.results.length === 0) {
       const tsParams = new URLSearchParams({
         query: keyword,
@@ -102,12 +120,13 @@ module.exports = async (req, res) => {
       searchResults = await fetchJSON(tsUrl);
 
       if (searchResults.status !== "OK" || !Array.isArray(searchResults.results) || searchResults.results.length === 0) {
-        return res.json({ success: true, data: [] });
+        // Surface Google status to help debugging instead of silent []
+        return res.json({ success: true, data: [], meta: { source: "textsearch", status: searchResults.status, msg: searchResults.error_message || null } });
       }
     }
 
     // Take up to 20 candidates with coordinates
-    const candidates = searchResults.results.slice(0, 20).map(p => {
+    let candidates = searchResults.results.slice(0, 20).map(p => {
       const lat = p.geometry?.location?.lat;
       const lng = p.geometry?.location?.lng;
       return lat != null && lng != null ? { raw: p, lat, lng } : null;
@@ -116,39 +135,57 @@ module.exports = async (req, res) => {
     if (candidates.length === 0)
       return res.json({ success: true, data: [] });
 
-    // 3) Get driving distance + ETA from Distance Matrix
-    const destinations = candidates.map(c => `${c.lat},${c.lng}`).join("|");
-    const dmParams = new URLSearchParams({
-      origins: `${origin.lat},${origin.lng}`,
-      destinations,
-      mode: "driving",
-      key: GOOGLE_MAPS_KEY,
-    });
-    const dmUrl = `https://maps.googleapis.com/maps/api/distancematrix/json?${dmParams.toString()}`;
-    const dm = await fetchJSON(dmUrl);
+    // Pre-filter by Haversine ≤ 20km (in case DM fails later)
+    candidates = candidates
+      .map(c => ({ ...c, approxMeters: haversineMeters(origin, { lat: c.lat, lng: c.lng }) }))
+      .filter(c => Number.isFinite(c.approxMeters) && c.approxMeters <= 20000);
 
-    const row = dm.rows?.[0];
-    const elems = row?.elements;
-    if (!Array.isArray(elems))
+    if (candidates.length === 0)
       return res.json({ success: true, data: [] });
 
-    // Merge + keep within 20km
-    const merged = candidates.map((c, i) => {
-      const el = elems[i];
-      const ok = el && el.status === "OK";
-      return {
+    // 2) Try Distance Matrix for driving distance + ETA
+    let merged;
+    try {
+      const destinations = candidates.map(c => `${c.lat},${c.lng}`).join("|");
+      const dmParams = new URLSearchParams({
+        origins: `${origin.lat},${origin.lng}`,
+        destinations,
+        mode: "driving",
+        key: GOOGLE_MAPS_KEY,
+      });
+      const dmUrl = `https://maps.googleapis.com/maps/api/distancematrix/json?${dmParams.toString()}`;
+      const dm = await fetchJSON(dmUrl);
+
+      const row = dm.rows?.[0];
+      const elems = row?.elements;
+
+      if (!Array.isArray(elems) || dm.status !== "OK") {
+        throw new Error(dm.error_message || dm.status || "Distance Matrix unavailable");
+      }
+
+      merged = candidates.map((c, i) => {
+        const el = elems[i];
+        const ok = el && el.status === "OK";
+        return {
+          place: c.raw,
+          lat: c.lat,
+          lng: c.lng,
+          distanceMeters: ok ? el.distance?.value ?? c.approxMeters : c.approxMeters,
+          etaText: ok ? el.duration?.text ?? null : null,
+        };
+      });
+    } catch (dmErr) {
+      // 🔥 Fallback: use haversine distance only (no ETA)
+      merged = candidates.map(c => ({
         place: c.raw,
         lat: c.lat,
         lng: c.lng,
-        distanceMeters: ok ? el.distance?.value ?? Infinity : Infinity,
-        etaText: ok ? el.duration?.text ?? null : null,
-      };
-    }).filter(m => Number.isFinite(m.distanceMeters) && m.distanceMeters <= 20000);
+        distanceMeters: c.approxMeters,
+        etaText: null,
+      }));
+    }
 
-    if (merged.length === 0)
-      return res.json({ success: true, data: [] });
-
-    // Sort by real distance and cap to 10
+    // Sort by distance and cap to 10
     merged.sort((a, b) => a.distanceMeters - b.distanceMeters);
     const top = merged.slice(0, 10);
 
@@ -156,7 +193,7 @@ module.exports = async (req, res) => {
       const address = m.place.formatted_address || m.place.vicinity || (m.place.plus_code?.compound_code || "");
       return {
         name: m.place.name,
-        lat: Number(m.lat.toFixed(6)), // WGS84, 6 decimals
+        lat: Number(m.lat.toFixed(6)),
         lng: Number(m.lng.toFixed(6)),
         city: parseCityFromAddress(address),
         address,
