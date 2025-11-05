@@ -1,9 +1,8 @@
 // api/suggest-locations.js
 
-// ✅ Pull the Maps key we added earlier
 const { GOOGLE_MAPS_KEY } = require("./_gemini_utils");
 
-// --- Helpers ---
+// ---------- helpers ----------
 async function fetchJSON(url, opts) {
   const r = await fetch(url, opts);
   if (!r.ok) {
@@ -28,75 +27,96 @@ function parseUserLocation(userLocation) {
   return null;
 }
 
+// Strip filler like "go to", "find a", "near me", etc. Keep it generic.
+function extractKeyword(q) {
+  const cleaned = String(q || "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!cleaned) return "";
+
+  // remove leading filler phrases
+  const stopPhrases = [
+    "go to", "find me", "find a", "find", "search", "look for",
+    "near me", "nearby", "closest", "nearest", "around me", "around"
+  ];
+  let s = cleaned;
+  for (const p of stopPhrases) {
+    if (s.startsWith(p + " ")) {
+      s = s.slice(p.length).trim();
+      break;
+    }
+  }
+  return s || cleaned;
+}
+
 function parseCityFromAddress(addr) {
   if (!addr || typeof addr !== "string") return "";
-  // Heuristic: take the second-to-last chunk as city (good enough without Place Details)
   const parts = addr.split(",").map(s => s.trim()).filter(Boolean);
   if (parts.length >= 2) return parts[parts.length - 2];
   return parts[0] || "";
 }
 
-function buildDescription(place, query) {
-  const t = Array.isArray(place.types) && place.types.length
-    ? place.types[0].replace(/_/g, " ")
-    : null;
-  const near = place.vicinity || place.formatted_address || "";
-  return [t ? t : `match for "${query}"`, near].filter(Boolean).join(" • ");
-}
-
+// ---------- route ----------
 module.exports = async (req, res) => {
-  // Allow only POST
-  if (req.method !== "POST") {
+  if (req.method !== "POST")
     return res.status(405).json({ error: "Method not allowed" });
-  }
 
-  if (!GOOGLE_MAPS_KEY) {
+  if (!GOOGLE_MAPS_KEY)
     return res.status(500).json({ error: "GOOGLE_MAPS_API_KEY missing on server" });
-  }
 
   try {
     const { userInput, userLocation } = req.body || {};
-    if (!userInput || !String(userInput).trim()) {
+    if (!userInput || !String(userInput).trim())
       return res.status(400).json({ error: "Missing userInput" });
-    }
 
-    // We MUST have a location for the 0–20 km constraint + sorting
     const origin = parseUserLocation(userLocation);
-    if (!origin) {
+    if (!origin)
       return res.status(400).json({ error: "Missing or invalid userLocation (lat,lng required)" });
-    }
 
-    const query = String(userInput).trim();
+    const keyword = extractKeyword(userInput);
+    if (!keyword)
+      return res.json({ success: true, data: [] });
 
-    // 🔎 Places Text Search within 20km of user
-    const tsParams = new URLSearchParams({
-      query,
+    // 1) Try Nearby Search (rank by distance) with keyword ONLY (no type – fully generic)
+    const nsParams = new URLSearchParams({
       location: `${origin.lat},${origin.lng}`,
-      radius: "20000", // 20 km hard limit
+      rankby: "distance",
+      keyword,
       key: GOOGLE_MAPS_KEY,
     });
-    const tsUrl = `https://maps.googleapis.com/maps/api/place/textsearch/json?${tsParams.toString()}`;
-    const ts = await fetchJSON(tsUrl);
+    const nsUrl = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?${nsParams.toString()}`;
+    let searchResults = await fetchJSON(nsUrl);
 
-    // If Text Search fails, return empty list (per your rule)
-    if (ts.status !== "OK" || !Array.isArray(ts.results) || ts.results.length === 0) {
-      return res.json({ success: true, data: [] });
+    // 2) Fallback to Text Search within 20 km if Nearby returns nothing
+    if (searchResults.status !== "OK" || !Array.isArray(searchResults.results) || searchResults.results.length === 0) {
+      const tsParams = new URLSearchParams({
+        query: keyword,
+        location: `${origin.lat},${origin.lng}`,
+        radius: "20000",
+        key: GOOGLE_MAPS_KEY,
+      });
+      const tsUrl = `https://maps.googleapis.com/maps/api/place/textsearch/json?${tsParams.toString()}`;
+      searchResults = await fetchJSON(tsUrl);
+
+      if (searchResults.status !== "OK" || !Array.isArray(searchResults.results) || searchResults.results.length === 0) {
+        return res.json({ success: true, data: [] });
+      }
     }
 
-    // Keep top 20 candidates before distance check (API/latlng quality)
-    const candidates = ts.results.slice(0, 20).map(p => {
+    // Take up to 20 candidates with coordinates
+    const candidates = searchResults.results.slice(0, 20).map(p => {
       const lat = p.geometry?.location?.lat;
       const lng = p.geometry?.location?.lng;
-      return lat != null && lng != null
-        ? { raw: p, lat, lng }
-        : null;
+      return lat != null && lng != null ? { raw: p, lat, lng } : null;
     }).filter(Boolean);
 
-    if (candidates.length === 0) {
+    if (candidates.length === 0)
       return res.json({ success: true, data: [] });
-    }
 
-    // 🧮 Batch distance + ETA with Distance Matrix (driving)
+    // 3) Get driving distance + ETA from Distance Matrix
     const destinations = candidates.map(c => `${c.lat},${c.lng}`).join("|");
     const dmParams = new URLSearchParams({
       origins: `${origin.lat},${origin.lng}`,
@@ -109,11 +129,10 @@ module.exports = async (req, res) => {
 
     const row = dm.rows?.[0];
     const elems = row?.elements;
-    if (!Array.isArray(elems)) {
+    if (!Array.isArray(elems))
       return res.json({ success: true, data: [] });
-    }
 
-    // Merge DM distances back into candidates
+    // Merge + keep within 20km
     const merged = candidates.map((c, i) => {
       const el = elems[i];
       const ok = el && el.status === "OK";
@@ -122,32 +141,26 @@ module.exports = async (req, res) => {
         lat: c.lat,
         lng: c.lng,
         distanceMeters: ok ? el.distance?.value ?? Infinity : Infinity,
-        distanceText: ok ? el.distance?.text ?? null : null,
         etaText: ok ? el.duration?.text ?? null : null,
       };
-    });
+    }).filter(m => Number.isFinite(m.distanceMeters) && m.distanceMeters <= 20000);
 
-    // Filter to ≤ 20 km
-    const within20k = merged.filter(m => Number.isFinite(m.distanceMeters) && m.distanceMeters <= 20000);
-
-    if (within20k.length === 0) {
+    if (merged.length === 0)
       return res.json({ success: true, data: [] });
-    }
 
-    // Sort by distance (nearest first) and take up to 10
-    within20k.sort((a, b) => a.distanceMeters - b.distanceMeters);
-    const top = within20k.slice(0, 10);
+    // Sort by real distance and cap to 10
+    merged.sort((a, b) => a.distanceMeters - b.distanceMeters);
+    const top = merged.slice(0, 10);
 
-    // Map to your required JSON shape
     const locations = top.map(m => {
-      const address = m.place.formatted_address || m.place.vicinity || "";
+      const address = m.place.formatted_address || m.place.vicinity || (m.place.plus_code?.compound_code || "");
       return {
         name: m.place.name,
         lat: Number(m.lat.toFixed(6)), // WGS84, 6 decimals
         lng: Number(m.lng.toFixed(6)),
         city: parseCityFromAddress(address),
         address,
-        description: buildDescription(m.place, query),
+        description: address ? `near ${parseCityFromAddress(address) || "you"}` : "near you",
         eta: m.etaText || "ETA unavailable",
       };
     });
